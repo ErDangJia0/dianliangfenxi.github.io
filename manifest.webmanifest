@@ -1,0 +1,19 @@
+{
+  "name": "24 小时分时数据整理工具",
+  "short_name": "分时数据",
+  "description": "在浏览器本地批量整理企业分时电量数据，生成月度 24 小时汇总和曲线。",
+  "lang": "zh-CN",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f2f5f2",
+  "theme_color": "#245c46",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
