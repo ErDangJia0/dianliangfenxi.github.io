@@ -4,16 +4,6 @@ const statusMessage = document.querySelector("#status-message");
 const fileList = document.querySelector("#file-list");
 const fileListItems = document.querySelector("#file-list-items");
 const clearFilesButton = document.querySelector("#clear-files");
-const configPanel = document.querySelector("#config-panel");
-const sourceSummary = document.querySelector("#source-summary");
-const sheetField = document.querySelector("#sheet-field");
-const sheetSelect = document.querySelector("#sheet-select");
-const companyColumn = document.querySelector("#company-column");
-const dateColumn = document.querySelector("#date-column");
-const timeColumn = document.querySelector("#time-column");
-const valueColumn = document.querySelector("#value-column");
-const intervalMode = document.querySelector("#interval-mode");
-const processButton = document.querySelector("#process-button");
 const resultPanel = document.querySelector("#result-panel");
 const resultSummary = document.querySelector("#result-summary");
 const qualityMessage = document.querySelector("#quality-message");
@@ -22,9 +12,6 @@ const previewNote = document.querySelector("#preview-note");
 const downloadCsvButton = document.querySelector("#download-csv");
 const downloadXlsxButton = document.querySelector("#download-xlsx");
 const filterCompany = document.querySelector("#filter-company");
-const filterMonthStart = document.querySelector("#filter-month-start");
-const filterMonthEnd = document.querySelector("#filter-month-end");
-const resetFiltersButton = document.querySelector("#reset-filters");
 const curvePanel = document.querySelector("#curve-panel");
 const curveCompany = document.querySelector("#curve-company");
 const curveType = document.querySelector("#curve-type");
@@ -35,9 +22,15 @@ const curveMonth = document.querySelector("#curve-month");
 const curveStartMonth = document.querySelector("#curve-start-month");
 const curveEndMonth = document.querySelector("#curve-end-month");
 const curveSummary = document.querySelector("#curve-summary");
+const curveTotalLabel = document.querySelector("#curve-total-label");
+const curvePeakLabel = document.querySelector("#curve-peak-label");
+const curveAverageLabel = document.querySelector("#curve-average-label");
 const curveTotal = document.querySelector("#curve-total");
 const curvePeak = document.querySelector("#curve-peak");
 const curveAverage = document.querySelector("#curve-average");
+const curveMonthTotals = document.querySelector("#curve-month-totals");
+const curveNote = document.querySelector("#curve-note");
+const chartWrap = document.querySelector("#chart-wrap");
 const curveChart = document.querySelector("#curve-chart");
 const downloadCurveButton = document.querySelector("#download-curve");
 
@@ -49,12 +42,7 @@ if ("serviceWorker" in navigator && ["http:", "https:"].includes(window.location
   });
 }
 
-const mappingSelects = {
-  company: companyColumn,
-  date: dateColumn,
-  time: timeColumn,
-  value: valueColumn,
-};
+const DEFAULT_INTERVAL_MODE = "auto";
 
 let sourceFiles = [];
 let parsedSources = [];
@@ -62,6 +50,7 @@ let fileEntries = [];
 let currentSheet = null;
 let currentAnalysis = null;
 let currentResult = null;
+let currentMapping = { company: -1, date: -1, time: -1, value: -1 };
 
 fileInput.addEventListener("change", () => {
   const files = [...fileInput.files];
@@ -88,20 +77,9 @@ dropZone.addEventListener("drop", (event) => {
 });
 
 clearFilesButton.addEventListener("click", clearFiles);
-sheetSelect.addEventListener("change", () => selectSingleSheet(Number(sheetSelect.value)));
-processButton.addEventListener("click", processCurrentSheet);
-intervalMode.addEventListener("change", () => currentSheet && processCurrentSheet());
 downloadCsvButton.addEventListener("click", downloadCsv);
 downloadXlsxButton.addEventListener("click", downloadXlsx);
-[filterCompany, filterMonthStart, filterMonthEnd].forEach((control) => {
-  control.addEventListener("change", () => currentSheet && processCurrentSheet());
-});
-resetFiltersButton.addEventListener("click", () => {
-  filterCompany.value = "";
-  filterMonthStart.value = "";
-  filterMonthEnd.value = "";
-  processCurrentSheet();
-});
+filterCompany.addEventListener("change", () => currentSheet && processCurrentSheet());
 [curveType, curveMonth, curveStartMonth, curveEndMonth].forEach(
   (control) => control.addEventListener("change", updateCurve),
 );
@@ -113,7 +91,7 @@ async function loadFiles(files) {
   parsedSources = [];
   currentSheet = null;
   currentResult = null;
-  configPanel.hidden = true;
+  currentMapping = { company: -1, date: -1, time: -1, value: -1 };
   resultPanel.hidden = true;
   curvePanel.hidden = true;
   document.querySelector("#tou-panel").hidden = true;
@@ -161,14 +139,15 @@ async function loadFiles(files) {
 
   prepareSources();
   const failedCount = fileEntries.filter((entry) => entry.isError).length;
-  showStatus(
-    failedCount
-      ? `成功读取 ${parsedSources.length} 个文件，${failedCount} 个文件未处理。`
-      : `已合并读取 ${parsedSources.length} 个文件。`,
-    failedCount > 0,
-  );
-  configPanel.hidden = false;
-  configPanel.scrollIntoView({ behavior: "smooth", block: "start" });
+  if (currentResult) {
+    showStatus(
+      failedCount
+        ? `成功读取 ${parsedSources.length} 个文件，${failedCount} 个文件未处理；月度数据已自动生成。`
+        : `已合并读取 ${parsedSources.length} 个文件，月度数据已自动生成。`,
+      failedCount > 0,
+    );
+  }
+  if (!resultPanel.hidden) resultPanel.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 async function parseFile(file, extension) {
@@ -216,10 +195,10 @@ function clearFiles() {
   currentSheet = null;
   currentAnalysis = null;
   currentResult = null;
+  currentMapping = { company: -1, date: -1, time: -1, value: -1 };
   fileInput.value = "";
   fileList.hidden = true;
   fileListItems.replaceChildren();
-  configPanel.hidden = true;
   resultPanel.hidden = true;
   curvePanel.hidden = true;
   document.querySelector("#tou-panel").hidden = true;
@@ -228,12 +207,17 @@ function clearFiles() {
 
 function prepareSources() {
   if (parsedSources.length === 1) {
-    populateSheetSelector(parsedSources[0].workbook);
-    selectSingleSheet(0);
+    const workbook = parsedSources[0].workbook;
+    const matchingIndex = workbook.sheets.findIndex((sheet) => {
+      const normalized = HourlyEngine.normalizeSourceSheet(sheet);
+      const analysis = HourlyEngine.analyzeSheet(normalized.rows);
+      const mapping = HourlyEngine.guessMapping(analysis.headers);
+      return Object.values(mapping).every((columnIndex) => columnIndex >= 0);
+    });
+    selectSingleSheet(matchingIndex >= 0 ? matchingIndex : 0);
     return;
   }
 
-  sheetField.hidden = true;
   currentSheet = HourlyEngine.combineSheets(
     parsedSources.map((source) => {
       const sheet = HourlyEngine.normalizeSourceSheet(source.workbook.sheets[0]);
@@ -247,17 +231,6 @@ function prepareSources() {
   configureCurrentSheet(
     `${parsedSources.length} 个文件 · ${Math.max(0, currentSheet.rows.length - 1).toLocaleString("zh-CN")} 行合并数据 · 每个文件的第一个工作表`,
   );
-}
-
-function populateSheetSelector(workbook) {
-  sheetSelect.replaceChildren();
-  workbook.sheets.forEach((sheet, index) => {
-    const option = document.createElement("option");
-    option.value = String(index);
-    option.textContent = sheet.name;
-    sheetSelect.append(option);
-  });
-  sheetField.hidden = workbook.sheets.length <= 1;
 }
 
 function selectSingleSheet(index) {
@@ -274,57 +247,26 @@ function selectSingleSheet(index) {
 
 function configureCurrentSheet(summary) {
   currentAnalysis = HourlyEngine.analyzeSheet(currentSheet.rows);
-  sourceSummary.textContent = summary;
-  populateMappingSelectors(currentAnalysis.headers);
+  currentMapping = HourlyEngine.guessMapping(currentAnalysis.headers);
   filterCompany.value = "";
-  filterMonthStart.value = "";
-  filterMonthEnd.value = "";
 
   const mapping = getMapping();
   if (Object.values(mapping).every((columnIndex) => columnIndex >= 0)) {
     processCurrentSheet();
   } else {
     resultPanel.hidden = true;
-    showStatus("文件已读取，请确认企业、日期、时点和电量字段。", false);
+    showStatus(`无法自动识别处理字段：${summary}。请检查源文件表头。`, true);
   }
 }
 
-function populateMappingSelectors(headers) {
-  const guesses = HourlyEngine.guessMapping(headers);
-
-  Object.entries(mappingSelects).forEach(([key, select]) => {
-    select.replaceChildren();
-    const placeholder = document.createElement("option");
-    placeholder.value = "-1";
-    placeholder.textContent = "请选择";
-    select.append(placeholder);
-
-    headers.forEach((header, index) => {
-      const option = document.createElement("option");
-      option.value = String(index);
-      option.textContent = header;
-      select.append(option);
-    });
-
-    select.value = String(guesses[key]);
-  });
-}
-
 function getMapping() {
-  return Object.fromEntries(
-    Object.entries(mappingSelects).map(([key, select]) => [key, Number(select.value)]),
-  );
+  return { ...currentMapping };
 }
 
 function processCurrentSheet() {
   const mapping = getMapping();
   if (Object.values(mapping).some((columnIndex) => columnIndex < 0)) {
-    showStatus("请先选择企业／对象名称、日期、时点和电量数值列。", true);
-    return;
-  }
-
-  if (filterMonthStart.value && filterMonthEnd.value && filterMonthStart.value > filterMonthEnd.value) {
-    showStatus("开始月份不能晚于结束月份。", true);
+    showStatus("无法自动识别企业、日期、时点或电量字段，请检查源文件表头。", true);
     return;
   }
 
@@ -332,17 +274,13 @@ function processCurrentSheet() {
     const discoveryResult = HourlyEngine.processData(currentSheet.rows, mapping, {
       headerIndex: currentAnalysis.headerIndex,
       outputMode: "daily",
-      intervalMode: intervalMode.value,
-      dateStart: filterMonthStart.value ? `${filterMonthStart.value}-01` : "",
-      dateEnd: filterMonthEnd.value ? getMonthEnd(filterMonthEnd.value) : "",
+      intervalMode: DEFAULT_INTERVAL_MODE,
     });
     const selectedCompany = filterCompany.value || discoveryResult.meta.availableCompanies[0] || "";
     const monthlyResult = HourlyEngine.buildMonthlySummary(currentSheet.rows, mapping, {
       headerIndex: currentAnalysis.headerIndex,
-      intervalMode: intervalMode.value,
+      intervalMode: DEFAULT_INTERVAL_MODE,
       companyFilter: selectedCompany,
-      dateStart: filterMonthStart.value ? `${filterMonthStart.value}-01` : "",
-      dateEnd: filterMonthEnd.value ? getMonthEnd(filterMonthEnd.value) : "",
     });
     currentResult = HourlyEngine.transposeMonthlySummary(monthlyResult);
     renderResult(currentResult);
@@ -377,7 +315,7 @@ function renderResult(result) {
       sheet: currentSheet,
       analysis: currentAnalysis,
       mapping: getMapping(),
-      intervalMode: intervalMode.value,
+      intervalMode: DEFAULT_INTERVAL_MODE,
       company: filterCompany.value || meta.selectedCompany,
     },
   }));
@@ -398,13 +336,6 @@ function populateFilterControls(meta) {
       ? meta.selectedCompany
       : meta.availableCompanies[0] || "";
 
-  const minimumMonth = meta.availableMonths[0] || "";
-  const maximumMonth = meta.availableMonths[meta.availableMonths.length - 1] || "";
-  [filterMonthStart, filterMonthEnd].forEach((input) => {
-    input.min = minimumMonth;
-    input.max = maximumMonth;
-    if (input.value && (input.value < minimumMonth || input.value > maximumMonth)) input.value = "";
-  });
 }
 
 function prepareCurveControls(meta) {
@@ -416,7 +347,7 @@ function prepareCurveControls(meta) {
     ? HourlyEngine.processData(currentSheet.rows, getMapping(), {
         headerIndex: currentAnalysis.headerIndex,
         outputMode: "daily",
-        intervalMode: intervalMode.value,
+        intervalMode: DEFAULT_INTERVAL_MODE,
         companyFilter: selectedCompany,
       })
     : null;
@@ -460,7 +391,7 @@ function updateCurve() {
   const companyDatesResult = HourlyEngine.processData(currentSheet.rows, getMapping(), {
     headerIndex: currentAnalysis.headerIndex,
     outputMode: "daily",
-    intervalMode: intervalMode.value,
+    intervalMode: DEFAULT_INTERVAL_MODE,
     companyFilter: selectedCompany,
   });
   const companyDates = companyDatesResult.meta.selectedDates;
@@ -470,9 +401,12 @@ function updateCurve() {
   preserveSelectValue(curveEndMonth, companyMonths, companyMonths[companyMonths.length - 1] || "");
 
   const type = curveType.value;
-  curveMonthField.hidden = type !== "daily";
+  curveMonthField.hidden = !["daily", "daily-total"].includes(type);
   curveStartMonthField.hidden = type !== "multi";
   curveEndMonthField.hidden = type !== "multi";
+  chartWrap.classList.remove("is-scrollable");
+  curveMonthTotals.hidden = type !== "monthly";
+  if (type !== "monthly") curveMonthTotals.replaceChildren();
 
   let label = "";
   let series = [];
@@ -485,7 +419,7 @@ function updateCurve() {
         const dailyResult = HourlyEngine.processData(currentSheet.rows, getMapping(), {
           headerIndex: currentAnalysis.headerIndex,
           outputMode: "daily",
-          intervalMode: intervalMode.value,
+          intervalMode: DEFAULT_INTERVAL_MODE,
           companyFilter: selectedCompany,
           dateStart: date,
           dateEnd: date,
@@ -499,13 +433,44 @@ function updateCurve() {
       .filter((item) => item.values.some((value) => typeof value === "number"));
     label = `${selectedCompany} · ${curveMonth.value} · ${series.length} 天日曲线叠加`;
     chartOptions = { dense: true, showLegend: false };
+    curveNote.textContent = "横轴为第1—24小时，纵轴为电量（MWh）；用不同颜色叠加所选月份每天的曲线。";
+  } else if (type === "daily-total") {
+    const datesInMonth = companyDates.filter((date) => date.startsWith(`${curveMonth.value}-`));
+    const bars = datesInMonth.map((date) => {
+      const dailyResult = HourlyEngine.processData(currentSheet.rows, getMapping(), {
+        headerIndex: currentAnalysis.headerIndex,
+        outputMode: "daily",
+        intervalMode: DEFAULT_INTERVAL_MODE,
+        companyFilter: selectedCompany,
+        dateStart: date,
+        dateEnd: date,
+      });
+      const values = dailyResult.rows[0]?.slice(2, 26) || [];
+      return {
+        label: date,
+        value: values.reduce((sum, value) => sum + (typeof value === "number" ? value : 0), 0),
+      };
+    });
+    label = `${selectedCompany} · ${curveMonth.value} · 月内日总电量变化`;
+    const total = bars.reduce((sum, item) => sum + item.value, 0);
+    const peak = bars.reduce((highest, item) => (!highest || item.value > highest.value ? item : highest), null);
+    curveSummary.textContent = label;
+    curveTotalLabel.textContent = "当月总量";
+    curvePeakLabel.textContent = "最高日";
+    curveAverageLabel.textContent = "日均电量";
+    curveTotal.textContent = formatFixed(total, 2);
+    curvePeak.textContent = peak ? `${peak.label} · ${formatFixed(peak.value, 2)} MWh` : "无数据";
+    curveAverage.textContent = formatFixed(bars.length ? total / bars.length : 0, 2);
+    curveNote.textContent = "横轴仅显示日期中的日，纵轴为每日总电量（MWh）；全月数据在同一视图展示，虚线表示该月日均电量。";
+    renderDailyTotalBarChart(bars, label);
+    return;
   } else if (type === "monthly") {
     series = companyMonths
       .map((month, index) => {
         const monthlyResult = HourlyEngine.processData(currentSheet.rows, getMapping(), {
           headerIndex: currentAnalysis.headerIndex,
           outputMode: "sum",
-          intervalMode: intervalMode.value,
+          intervalMode: DEFAULT_INTERVAL_MODE,
           companyFilter: selectedCompany,
           dateStart: `${month}-01`,
           dateEnd: getMonthEnd(month),
@@ -519,6 +484,8 @@ function updateCurve() {
       .filter((item) => item.values.some((value) => typeof value === "number"));
     label = `${selectedCompany} · ${series.length} 个月月度曲线对比`;
     chartOptions = { dense: series.length > 12, showLegend: true };
+    renderMonthlyTotalSummary(series);
+    curveNote.textContent = "横轴为第1—24小时，纵轴为电量（MWh）；上方同时展示每个月的电量总量。";
   } else {
     if (curveStartMonth.value > curveEndMonth.value) {
       curveEndMonth.value = curveStartMonth.value;
@@ -527,7 +494,7 @@ function updateCurve() {
     const curveResult = HourlyEngine.processData(currentSheet.rows, getMapping(), {
       headerIndex: currentAnalysis.headerIndex,
       outputMode: "sum",
-      intervalMode: intervalMode.value,
+      intervalMode: DEFAULT_INTERVAL_MODE,
       companyFilter: selectedCompany,
       dateStart: `${curveStartMonth.value}-01`,
       dateEnd: getMonthEnd(curveEndMonth.value),
@@ -539,11 +506,12 @@ function updateCurve() {
         color: "#245c46",
       },
     ];
+    curveNote.textContent = "横轴为第1—24小时，纵轴为所选月份范围汇总后的电量（MWh）。";
   }
 
   const points = series.flatMap((item) =>
     item.values.flatMap((value, hourIndex) =>
-      typeof value === "number" ? [{ value, hourIndex }] : [],
+      typeof value === "number" ? [{ value, hourIndex, seriesLabel: item.label }] : [],
     ),
   );
   const total = points.reduce((sum, point) => sum + point.value, 0);
@@ -553,12 +521,146 @@ function updateCurve() {
   );
 
   curveSummary.textContent = label;
-  curveTotal.textContent = formatNumber(total);
+  curveTotalLabel.textContent = type === "monthly" ? "全部月份总量" : "合计";
+  curvePeakLabel.textContent = "单小时峰值";
+  curveAverageLabel.textContent = "小时均值";
+  curveTotal.textContent = formatFixed(total, 2);
   curvePeak.textContent = peakPoint
-    ? `${formatNumber(peakPoint.value)} MWh（第 ${peakPoint.hourIndex + 1} 小时）`
+    ? `${formatFixed(peakPoint.value, 2)} MWh（${series.length > 1 ? `${peakPoint.seriesLabel} · ` : ""}第 ${peakPoint.hourIndex + 1} 小时）`
     : "无数据";
-  curveAverage.textContent = formatNumber(points.length ? total / points.length : 0);
+  curveAverage.textContent = formatFixed(points.length ? total / points.length : 0, 2);
   renderCurveChart(series, label, chartOptions);
+}
+
+function renderMonthlyTotalSummary(series) {
+  const fragment = document.createDocumentFragment();
+  series.forEach((item) => {
+    const total = item.values.reduce(
+      (sum, value) => sum + (typeof value === "number" ? value : 0),
+      0,
+    );
+    const entry = document.createElement("span");
+    const month = document.createElement("strong");
+    month.textContent = item.label;
+    entry.append(month, document.createTextNode(` ${formatFixed(total, 2)} MWh`));
+    fragment.append(entry);
+  });
+  curveMonthTotals.replaceChildren(fragment);
+}
+
+function renderDailyTotalBarChart(items, label) {
+  curveChart.replaceChildren();
+  curveChart.dataset.hasData = "false";
+  curveChart.setAttribute("aria-label", label);
+  const width = 960;
+  const height = 400;
+  const margin = { top: 88, right: 24, bottom: 48, left: 76 };
+  const plotWidth = width - margin.left - margin.right;
+  const plotHeight = height - margin.top - margin.bottom;
+  curveChart.setAttribute("viewBox", `0 0 ${width} ${height}`);
+  curveChart.dataset.chartType = "daily-total";
+  curveChart.style.minWidth = "";
+  curveChart.dataset.chartWidth = String(width);
+  curveChart.dataset.chartHeight = String(height);
+
+  if (!items.length) {
+    curveChart.append(
+      createSvgElement(
+        "text",
+        { x: width / 2, y: height / 2, "text-anchor": "middle", fill: "#68776f", "font-size": 15 },
+        "所选月份没有可绘制的日总电量",
+      ),
+    );
+    return;
+  }
+
+  curveChart.dataset.hasData = "true";
+  const maximumValue = Math.max(...items.map((item) => item.value), 0);
+  const maximum = maximumValue > 0 ? maximumValue * 1.12 : 1;
+  const average = items.reduce((sum, item) => sum + item.value, 0) / items.length;
+  const slotWidth = plotWidth / items.length;
+  const barWidth = Math.max(5, Math.min(13, slotWidth * 0.46));
+  const y = (value) => margin.top + ((maximum - value) / maximum) * plotHeight;
+
+  for (let tick = 0; tick <= 5; tick += 1) {
+    const value = (maximum * tick) / 5;
+    const yPosition = y(value);
+    curveChart.append(
+      createSvgElement("line", {
+        x1: margin.left,
+        y1: yPosition,
+        x2: width - margin.right,
+        y2: yPosition,
+        stroke: "#dce5df",
+        "stroke-width": 1,
+      }),
+      createSvgElement(
+        "text",
+        { x: margin.left - 12, y: yPosition + 4, "text-anchor": "end", fill: "#68776f", "font-size": 12 },
+        formatFixed(value, 2),
+      ),
+    );
+  }
+
+  items.forEach((item, index) => {
+    const centerX = margin.left + slotWidth * (index + 0.5);
+    const top = y(item.value);
+    const dayLabel = `${Number(item.label.slice(-2))}日`;
+    const bar = createSvgElement("rect", {
+      x: centerX - barWidth / 2,
+      y: top,
+      width: barWidth,
+      height: Math.max(0, margin.top + plotHeight - top),
+      rx: 2,
+      fill: "#2f7d5b",
+    });
+    bar.append(createSvgElement("title", {}, `${item.label}：${formatFixed(item.value, 2)} MWh`));
+    curveChart.append(
+      bar,
+      createSvgElement(
+        "text",
+        {
+          x: centerX,
+          y: Math.max(18, top - 7),
+          "text-anchor": "start",
+          fill: "#42534a",
+          "font-size": 9,
+          transform: `rotate(-90 ${centerX} ${Math.max(18, top - 7)})`,
+        },
+        formatFixed(item.value, 2),
+      ),
+      createSvgElement(
+        "text",
+        {
+          x: centerX,
+          y: margin.top + plotHeight + 24,
+          "text-anchor": "middle",
+          fill: "#68776f",
+          "font-size": 11,
+        },
+        dayLabel,
+      ),
+    );
+  });
+
+  const averageY = y(average);
+  curveChart.append(
+    createSvgElement("line", {
+      x1: margin.left,
+      y1: averageY,
+      x2: width - margin.right,
+      y2: averageY,
+      stroke: "#d97706",
+      "stroke-width": 2,
+      "stroke-dasharray": "8 6",
+    }),
+    createSvgElement(
+      "text",
+      { x: width - margin.right, y: averageY - 8, "text-anchor": "end", fill: "#9a5a06", "font-size": 12 },
+      `日均 ${formatFixed(average, 2)} MWh`,
+    ),
+    createSvgElement("text", { x: 18, y: margin.top - 8, fill: "#68776f", "font-size": 12 }, "MWh"),
+  );
 }
 
 function preserveSelectValue(select, values, fallback) {
@@ -603,6 +705,8 @@ function getCurveColor(index, type) {
 function renderCurveChart(series, label, options = {}) {
   curveChart.replaceChildren();
   curveChart.dataset.hasData = "false";
+  curveChart.dataset.chartType = "line";
+  curveChart.style.minWidth = "";
   curveChart.setAttribute("aria-label", label);
   const width = 960;
   const legendColumns = 6;
@@ -663,14 +767,22 @@ function renderCurveChart(series, label, options = {}) {
           fill: "#68776f",
           "font-size": 12,
         },
-        formatNumber(value),
+        formatFixed(value, 2),
       ),
     );
   }
 
   for (let index = 0; index < 24; index += 1) {
-    if (index % 2 !== 0 && index !== 23) continue;
+    const axisY = margin.top + plotHeight;
     curveChart.append(
+      createSvgElement("line", {
+        x1: x(index),
+        y1: axisY,
+        x2: x(index),
+        y2: axisY + 5,
+        stroke: "#aab7b0",
+        "stroke-width": 1,
+      }),
       createSvgElement(
         "text",
         {
@@ -678,9 +790,9 @@ function renderCurveChart(series, label, options = {}) {
           y: height - 22,
           "text-anchor": "middle",
           fill: "#68776f",
-          "font-size": 12,
+          "font-size": 10,
         },
-        `${index + 1}时`,
+        `${index + 1}`,
       ),
     );
   }
@@ -722,7 +834,7 @@ function renderCurveChart(series, label, options = {}) {
         "stroke-width": 2,
       });
       point.append(
-        createSvgElement("title", {}, `第 ${index + 1} 小时：${formatNumber(value)} MWh`),
+        createSvgElement("title", {}, `第 ${index + 1} 小时：${formatFixed(value, 2)} MWh`),
       );
       curveChart.append(point);
     });
@@ -843,6 +955,13 @@ function formatNumber(value) {
   }).format(value);
 }
 
+function formatFixed(value, digits) {
+  return Number(value || 0).toLocaleString("zh-CN", {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  });
+}
+
 function showStatus(message, isError = false) {
   statusMessage.textContent = message;
   statusMessage.classList.toggle("is-error", isError);
@@ -858,14 +977,14 @@ function getSelectedCompanyDownloadResult() {
 
   const monthlyResult = HourlyEngine.buildMonthlySummary(currentSheet.rows, getMapping(), {
     headerIndex: currentAnalysis.headerIndex,
-    intervalMode: intervalMode.value,
+    intervalMode: DEFAULT_INTERVAL_MODE,
     companyFilter: company,
   });
   if (!monthlyResult.rows.length) {
     showStatus("所选企业没有可导出的月度数据。", true);
     return null;
   }
-  return HourlyEngine.transposeMonthlySummary(monthlyResult);
+  return HourlyEngine.transposeMonthlySummary(monthlyResult, { decimalPlaces: 2 });
 }
 
 function makeMonthlyOutputName(extension) {
@@ -923,7 +1042,7 @@ async function downloadXlsx() {
 
 async function downloadCurvePng() {
   if (curveChart.dataset.hasData !== "true") {
-    showStatus("当前曲线没有可下载的数据。", true);
+    showStatus("当前图表没有可下载的数据。", true);
     return;
   }
 
@@ -961,13 +1080,13 @@ async function downloadCurvePng() {
     context.drawImage(image, 0, 0, canvas.width, canvas.height);
     const pngBlob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
     const safeCompany = (filterCompany.value || "企业").replace(/[\\/:*?"<>|]/g, "_");
-    const typeLabel = { daily: "整月日曲线", monthly: "全部月份月曲线", multi: "多月总曲线" }[
+    const typeLabel = { daily: "整月日曲线", "daily-total": "月内日总电量", monthly: "全部月份月曲线", multi: "多月总曲线" }[
       curveType.value
     ];
     triggerDownload(pngBlob, `${safeCompany}_${typeLabel}.png`);
   } catch (error) {
     console.error(error);
-    showStatus("曲线图片生成失败，请重试。", true);
+    showStatus("图表图片生成失败，请重试。", true);
   } finally {
     URL.revokeObjectURL(svgUrl);
   }

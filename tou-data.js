@@ -36,6 +36,7 @@
     [373.032,354.18,360.6,344.76,343.802,364.387,343.809,272.997,195.726,122.695,101.935,102.299,102.394,102.352,102.026,152.652,247.649,333.756,436.928,519.398,520.442,484.892,379.184,343.234],
     [372.32,353.248,353.215,343.977,342.448,347.581,328.144,291.524,245.921,186.783,138.45,101.614,100.61,100.529,136.841,209.344,283.42,337.376,416.957,512.254,523.072,494.09,398.841,350.433],
     [369.928,343.444,352.009,334.065,329.798,329.281,324.335,296.836,269.626,216.377,172.008,108.295,95.378,95.387,186.556,276.243,332.182,372.211,460.304,527.808,528.2,507.589,417.848,361.238],
+    [363.819,354.107,357.978,349.2,347.326,349.499,349.502,323.135,285.365,204.769,150.653,102.642,102.701,102.685,137.326,250.127,315.166,394.74,439.436,431.161,416.401,399.038,374.475,354.82],
   ];
 
   const spotPrices = [
@@ -47,25 +48,68 @@
     [368.084,349.773,357.396,342.044,341.01,359.646,338.651,266.485,188.718,118.843,98.603,99.448,98.806,98.652,100.029,149.164,240.54,328.591,434.546,517.686,519.808,477.933,373.963,339.76],
     [369.069,351.001,352.85,342.504,340.611,344.918,325.885,288.014,237.013,177.972,131.41,98.615,96.169,97.959,133.03,205.004,278.899,336.065,417.428,511.662,521.199,487.13,395.995,348.878],
     [370.633,345.266,353.514,335.976,331.499,330.79,325.028,297.573,268.278,211.666,169.985,112.54,98.77,99.946,184.937,272.536,329.242,371.199,464.777,530.978,530.481,499.401,417.8,363.746],
+    [364.311,354.797,361.612,350.555,348.649,349.912,349.105,323.603,286.674,204.414,154.389,110.634,109.385,108.237,140.533,250.014,315.668,395.404,450.794,436.742,420.354,400.74,378.686,358.138],
   ];
 
   const gridInputs = [
     [304.1, -8.232], [291.25, 14.146], [283.758, 5.836], [291.545, 31.408],
     [279.485, -6.153], [276.004, 11.98], [283.474, 2.63], [315.517, 13.177],
+    [290.062, 28.94],
   ];
-  const gridLevels = gridInputs.map(([base, adjustment]) => ({
-    S: base * 1.92 + adjustment,
-    H: base * 1.6 + adjustment,
-    P: base + adjustment,
-    V: base * 0.45 + adjustment,
-  }));
+  const gridLevels = [
+    { S: 575.64, H: 478.328, P: 295.868, V: 128.613 },
+    { S: 480.146, H: 480.146, P: 305.396, V: 145.2085 },
+    { S: 459.8488, H: 459.8488, P: 289.594, V: 133.5271 },
+    { S: 497.88, H: 497.88, P: 322.953, V: 162.60325 },
+    { S: 441.023, H: 441.023, P: 273.332, V: 119.61525 },
+    { S: 541.90768, H: 453.5864, P: 287.984, V: 136.1818 },
+    { S: 546.90008, H: 456.1884, P: 286.104, V: 130.1933 },
+    { S: 618.96964, H: 518.0042, P: 328.694, V: 155.15965 },
+    { S: 493.0392, H: 493.0392, P: 319.002, V: 159.4679 },
+  ];
+  const gridSupportFees = [
+    { lineLoss: 0.014417, transmission: 0.104, governmentFund: 0.04336875, systemOperation: 0.097465, total: 0.25925075 },
+    { lineLoss: 0.014205, transmission: 0.104, governmentFund: 0.04336875, systemOperation: 0.106514, total: 0.26808775 },
+    { lineLoss: 0.014018, transmission: 0.104, governmentFund: 0.04336875, systemOperation: 0.096174, total: 0.25756075 },
+    { lineLoss: 0.011532, transmission: 0.104, governmentFund: 0.04336875, systemOperation: 0.091299, total: 0.25019975 },
+    { lineLoss: 0.011205, transmission: 0.104, governmentFund: 0.04336875, systemOperation: 0.078626, total: 0.23719975 },
+    { lineLoss: 0.01112, transmission: 0.104, governmentFund: 0.04336875, systemOperation: 0.101021, total: 0.25950975 },
+    { lineLoss: 0.01123, transmission: 0.104, governmentFund: 0.04336875, systemOperation: 0.091741, total: 0.25033975 },
+    { lineLoss: 0.011931, transmission: 0.104, governmentFund: 0.04336875, systemOperation: 0.065156, total: 0.22445575 },
+    { lineLoss: 0.011731, transmission: 0.104, governmentFund: 0.04336875, systemOperation: 0.063253, total: 0.22235275 },
+    null,
+    null,
+    null,
+  ];
+
+  const gridCapacityDemandCharges = [
+    { voltage: "1—10（20）千伏", demandPrice: 34.8, capacityPrice: 21.8 },
+    { voltage: "35千伏", demandPrice: 34.0, capacityPrice: 21.3 },
+    { voltage: "110千伏", demandPrice: 31.6, capacityPrice: 19.8 },
+    { voltage: "220千伏及以上", demandPrice: 30.0, capacityPrice: 18.8 },
+  ];
 
   return {
-    sourceName: "TOU_Price_Analysis_Fixed.xlsx",
+    sourceName: "TOU_Price_Analysis.xlsx",
     analysisYear: 2026,
-    gridFormulaText: "计算公式：尖峰=平段基价×1.92+折价电费；高峰=平段基价×1.6+折价电费；平段=平段基价+折价电费；低谷=平段基价×0.45+折价电费（单位：元/MWh）",
-    coveredMonths: 8,
-    priceMonthIndexes: Array.from({ length: 8 }, (_, index) => index),
+    gridFormulaText: "计算公式：尖峰=平段基价×1.92+折价；高峰=平段基价×1.6+折价；平段=平段基价+折价；低谷=平段基价×0.45+折价（单位：元/MWh）",
+    coveredMonths: 9,
+    priceMonthIndexes: Array.from({ length: 9 }, (_, index) => index),
+    gridMonthIndexes: Array.from({ length: 9 }, (_, index) => index),
+    officialUpdateMode: "scheduled-incremental",
+    officialUpdatedAt: "2026-09-17",
+    officialSources: {
+      market: {
+        name: "分时价格浮动项历史参考值",
+        latestMonth: "2026-09",
+        url: "https://pmos.sx.sgcc.com.cn/pxf-phbsx-shop/#/markertInfo/timeDivisionPricePage",
+      },
+      grid: {
+        name: "电网企业代理购电工商业用户电价价格表",
+        latestMonth: "2026-09",
+        url: "https://pmos.sx.sgcc.com.cn/pxf-settlement-outnetpub/#/pxf-settlement-outnetpub/hotInformation?marketId=PHBSX&pidTem=1",
+      },
+    },
     defaultPackage: "term",
     defaultMarkup: 20,
     months,
@@ -76,5 +120,9 @@
     spotPrices,
     gridInputs,
     gridLevels,
+    gridSupportFees,
+    gridCapacityDemandCharges,
+    supportFeeNote: "国网其他费用与国网分时电价均取自同一份当月国网代理购电价表，并采用两部制1—10（20）千伏同一行数据；不同用电类别与电压等级标准不同。",
+    capacityDemandNote: "固定展示2026年9月国网山西省电力有限公司代理购电工商业用户电价表中的两部制容（需）量电价。实际计费方式以用户供用电合同及国网账单为准。",
   };
 });

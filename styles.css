@@ -291,13 +291,20 @@ h1 {
 .result-filters,
 .curve-controls {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
   align-items: end;
   gap: 12px;
   margin-top: 24px;
   padding: 16px;
   border-radius: 13px;
   background: #f4f7f5;
+}
+
+.result-filters {
+  grid-template-columns: minmax(260px, 420px);
+}
+
+.curve-controls {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .result-filters label,
@@ -409,7 +416,7 @@ h1 {
 
 .analysis-controls {
   display: grid;
-  grid-template-columns: 1.5fr repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   align-items: end;
   gap: 12px;
   margin-top: 24px;
@@ -509,9 +516,63 @@ h1 {
   margin-top: 18px;
 }
 
+.analysis-view-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.analysis-view-heading > div {
+  min-width: 0;
+}
+
+.analysis-view-heading p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.analysis-download-button {
+  flex: 0 0 auto;
+  min-height: 38px;
+}
+
 .analysis-view h3 {
   margin: 0 0 5px;
   font-size: 18px;
+}
+
+.analysis-view h4 {
+  margin: 20px 0 8px;
+  color: var(--text);
+  font-size: 15px;
+}
+
+.tou-comparison-insights {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.tou-comparison-insights > div {
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #f8faf8;
+}
+
+.tou-comparison-insights strong {
+  color: var(--primary);
+}
+
+.tou-comparison-insights p {
+  margin: 7px 0 0;
+  color: #42534a;
+  font-size: 13px;
+  line-height: 1.7;
 }
 
 .analysis-view > p {
@@ -637,6 +698,12 @@ h1 {
 .analysis-table .tou-negative {
   color: #a13f45;
   background: #fcebed !important;
+}
+
+.analysis-table .tou-preferred {
+  color: #236334;
+  background: #e5f3e1 !important;
+  font-weight: 700;
 }
 
 .analysis-table .tou-placeholder {
@@ -807,6 +874,66 @@ tr:last-child td {
   font-variant-numeric: tabular-nums;
 }
 
+.curve-month-totals {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0 0 12px;
+}
+
+.curve-month-totals span {
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  color: var(--muted);
+  background: #f8faf8;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.curve-month-totals strong {
+  color: var(--text);
+}
+
+.tou-support-fee-stats {
+  margin-top: 14px;
+}
+
+.tou-fixed-charge-block {
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid var(--line);
+}
+
+.tou-fixed-charge-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.tou-fixed-charge-heading h4,
+.tou-fixed-charge-heading p {
+  margin: 0;
+}
+
+.tou-fixed-charge-heading p {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.tou-fixed-badge {
+  flex: 0 0 auto;
+  padding: 5px 9px;
+  border-radius: 999px;
+  color: #245c46;
+  background: #e8f3ed;
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .chart-wrap {
   width: 100%;
   overflow: hidden;
@@ -815,7 +942,12 @@ tr:last-child td {
   background: #fff;
 }
 
-#curve-chart {
+.chart-wrap.is-scrollable {
+  overflow-x: auto;
+}
+
+#curve-chart,
+#tou-support-fee-chart {
   display: block;
   width: 100%;
   height: auto;
@@ -841,7 +973,6 @@ tr:last-child td {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .result-filters,
   .curve-controls,
   .analysis-controls {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -853,6 +984,22 @@ tr:last-child td {
 
   .analysis-stats {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .curve-month-totals {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .tou-fixed-charge-heading {
+    flex-direction: column;
+  }
+
+  .analysis-view-heading {
+    flex-direction: column;
+  }
+
+  .analysis-download-button {
+    width: 100%;
   }
 
   .file-list ul {
@@ -903,6 +1050,10 @@ tr:last-child td {
   .result-filters,
   .curve-controls,
   .analysis-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .curve-month-totals {
     grid-template-columns: 1fr;
   }
 

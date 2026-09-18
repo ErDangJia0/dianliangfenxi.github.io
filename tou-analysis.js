@@ -1,6 +1,58 @@
 (function () {
   "use strict";
 
+  function calculateUserPackageComparison(energyByMonth, termPrices, spotPrices, monthIndexes, markup = 0) {
+    const result = {
+      monthIndexes: [],
+      totalEnergy: 0,
+      termCost: 0,
+      spotCost: 0,
+      difference: 0,
+      cheaperType: "equal",
+      termLowerMonths: 0,
+      spotLowerMonths: 0,
+      equalMonths: 0,
+    };
+    const commonMarkup = Number.isFinite(Number(markup)) ? Number(markup) : 0;
+    const completePrices = (values) =>
+      Array.isArray(values) &&
+      values.length >= 24 &&
+      values.slice(0, 24).every((value) => value !== null && value !== "" && Number.isFinite(Number(value)));
+
+    monthIndexes.forEach((monthIndex) => {
+      const energy = energyByMonth.get(monthIndex);
+      const term = termPrices?.[monthIndex];
+      const spot = spotPrices?.[monthIndex];
+      if (!Array.isArray(energy) || energy.length < 24 || !completePrices(term) || !completePrices(spot)) return;
+      const totalEnergy = energy.slice(0, 24).reduce((sum, value) => sum + (Number(value) || 0), 0);
+      if (totalEnergy <= 0) return;
+      const termCost = energy.slice(0, 24).reduce(
+        (sum, value, hourIndex) => sum + (Number(value) || 0) * (Number(term[hourIndex]) + commonMarkup),
+        0,
+      );
+      const spotCost = energy.slice(0, 24).reduce(
+        (sum, value, hourIndex) => sum + (Number(value) || 0) * (Number(spot[hourIndex]) + commonMarkup),
+        0,
+      );
+      result.monthIndexes.push(monthIndex);
+      result.totalEnergy += totalEnergy;
+      result.termCost += termCost;
+      result.spotCost += spotCost;
+      if (termCost < spotCost - 0.005) result.termLowerMonths += 1;
+      else if (spotCost < termCost - 0.005) result.spotLowerMonths += 1;
+      else result.equalMonths += 1;
+    });
+
+    result.difference = Math.abs(result.termCost - result.spotCost);
+    if (result.termCost < result.spotCost - 0.005) result.cheaperType = "term";
+    else if (result.spotCost < result.termCost - 0.005) result.cheaperType = "spot";
+    return result;
+  }
+
+  if (typeof module === "object" && module.exports) {
+    module.exports = { calculateUserPackageComparison };
+  }
+
   let data = globalThis.TouPriceData;
   const engine = globalThis.HourlyEngine;
   const templateParser = globalThis.TouTemplate;
@@ -11,9 +63,16 @@
   const templateInput = document.querySelector("#tou-template-input");
   const templateButton = document.querySelector("#tou-template-button");
   const templateName = document.querySelector("#tou-template-name");
+  const officialStatus = document.querySelector("#tou-official-status");
   const packageSelect = document.querySelector("#tou-package");
   const markupInput = document.querySelector("#tou-markup");
   const gridFormulaText = document.querySelector("#tou-grid-formula-text");
+  const supportFeeNote = document.querySelector("#tou-support-fee-note");
+  const supportFeeAverage = document.querySelector("#tou-support-fee-average");
+  const supportFeeChart = document.querySelector("#tou-support-fee-chart");
+  const capacityDemandNote = document.querySelector("#tou-capacity-demand-note");
+  const termDownloadButton = document.querySelector("#download-tou-term");
+  const spotDownloadButton = document.querySelector("#download-tou-spot");
   const note = document.querySelector("#tou-note");
   const tabs = [...document.querySelectorAll("[data-tou-tab]")];
   const views = [...document.querySelectorAll("[data-tou-panel]")];
@@ -21,6 +80,10 @@
   let templateSignature = "";
   let templateTimer = null;
   let templateLoading = false;
+  const TEMPLATE_DB_NAME = "hourly-data-tool-settings";
+  const TEMPLATE_DB_VERSION = 1;
+  const TEMPLATE_STORE_NAME = "linked-files";
+  const TEMPLATE_HANDLE_KEY = "tou-price-source";
 
   const state = {
     monthly: null,
@@ -38,6 +101,10 @@
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
+  const supportFeeFormat = new Intl.NumberFormat("zh-CN", {
+    minimumFractionDigits: 3,
+    maximumFractionDigits: 3,
+  });
 
   function number(value) {
     const parsed = Number(value);
@@ -53,6 +120,79 @@
     return `${file.name}|${file.size}|${file.lastModified}`;
   }
 
+  function renderOfficialStatus() {
+    if (!officialStatus) return;
+    const marketMonth = data.officialSources?.market?.latestMonth || "待更新";
+    const gridMonth = data.officialSources?.grid?.latestMonth || "待更新";
+    const updatedAt = data.officialUpdatedAt ? `；最近写入 ${data.officialUpdatedAt}` : "";
+    officialStatus.textContent = `官网增量更新：国网价格及其他费用每月5日检查，当前已到 ${gridMonth}；旬及以上／带现货基础价每月22日检查，当前已到 ${marketMonth}${updatedAt}。发现新月份时只更新对应月份，其余月份保留。`;
+  }
+
+  function openTemplateDatabase() {
+    return new Promise((resolve, reject) => {
+      if (!("indexedDB" in globalThis)) {
+        resolve(null);
+        return;
+      }
+      const request = indexedDB.open(TEMPLATE_DB_NAME, TEMPLATE_DB_VERSION);
+      request.onupgradeneeded = () => {
+        if (!request.result.objectStoreNames.contains(TEMPLATE_STORE_NAME)) {
+          request.result.createObjectStore(TEMPLATE_STORE_NAME);
+        }
+      };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async function saveTemplateHandle(handle) {
+    const database = await openTemplateDatabase();
+    if (!database) return;
+    await new Promise((resolve, reject) => {
+      const transaction = database.transaction(TEMPLATE_STORE_NAME, "readwrite");
+      transaction.objectStore(TEMPLATE_STORE_NAME).put(handle, TEMPLATE_HANDLE_KEY);
+      transaction.oncomplete = resolve;
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error);
+    });
+    database.close();
+  }
+
+  async function readTemplateHandle() {
+    const database = await openTemplateDatabase();
+    if (!database) return null;
+    const handle = await new Promise((resolve, reject) => {
+      const transaction = database.transaction(TEMPLATE_STORE_NAME, "readonly");
+      const request = transaction.objectStore(TEMPLATE_STORE_NAME).get(TEMPLATE_HANDLE_KEY);
+      request.onsuccess = () => resolve(request.result || null);
+      request.onerror = () => reject(request.error);
+    });
+    database.close();
+    return handle;
+  }
+
+  async function clearTemplateHandle() {
+    const database = await openTemplateDatabase();
+    if (!database) return;
+    await new Promise((resolve, reject) => {
+      const transaction = database.transaction(TEMPLATE_STORE_NAME, "readwrite");
+      transaction.objectStore(TEMPLATE_STORE_NAME).delete(TEMPLATE_HANDLE_KEY);
+      transaction.oncomplete = resolve;
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error);
+    });
+    database.close();
+  }
+
+  async function getTemplatePermission(handle, requestAccess = false) {
+    if (!handle || typeof handle.queryPermission !== "function") return "granted";
+    let permission = await handle.queryPermission({ mode: "read" });
+    if (permission !== "granted" && requestAccess && typeof handle.requestPermission === "function") {
+      permission = await handle.requestPermission({ mode: "read" });
+    }
+    return permission;
+  }
+
   async function loadTemplateFile(file, options = {}) {
     if (templateLoading) return false;
     templateLoading = true;
@@ -60,19 +200,23 @@
     templateButton.textContent = "正在读取…";
     try {
       const workbook = await engine.parseXlsx(await file.arrayBuffer(), JSZip);
-      data = templateParser.parsePriceWorkbook(workbook, file.name, data);
+      data = templateParser.parseAnyPriceWorkbook(workbook, file.name, data);
       packageSelect.value = data.defaultPackage;
       markupInput.value = String(data.defaultMarkup);
       templateSignature = getFileSignature(file);
       templateName.textContent = options.watching
-        ? `${file.name} · 自动监测中`
+        ? `${file.name} · 已绑定并自动检查更新`
         : `${file.name} · 已载入（更新后请重新选择）`;
       renderBaseTable("#tou-term-table", data.termPrices);
       renderBaseTable("#tou-spot-table", data.spotPrices);
+      renderSupportFeeTable();
+      renderOfficialStatus();
       refreshAll();
       globalThis.showStatus?.(
         options.auto
           ? `检测到模板已更新，已自动重新计算：${file.name}。`
+          : options.restored
+            ? `已自动读取绑定的电价数据：${file.name}。`
           : `已读取最新电价分析模板：${file.name}。`,
         false,
       );
@@ -85,7 +229,7 @@
     } finally {
       templateLoading = false;
       templateButton.disabled = false;
-      templateButton.textContent = "选择或刷新 Excel";
+      templateButton.textContent = templateHandle ? "更换或刷新 Excel" : "绑定或刷新 Excel";
       templateInput.value = "";
     }
   }
@@ -108,7 +252,8 @@
       } catch (error) {
         console.warn("模板自动监测已停止", error);
         stopTemplateWatch();
-        templateName.textContent = "自动监测已停止，可重新选择 Excel";
+        templateName.textContent = "文件访问权限已失效，点击按钮重新授权";
+        templateButton.textContent = "授权并刷新 Excel";
       }
     }, 4000);
   }
@@ -119,6 +264,19 @@
       return;
     }
     try {
+      if (templateHandle && await getTemplatePermission(templateHandle) !== "granted") {
+        const permission = await getTemplatePermission(templateHandle, true);
+        if (permission !== "granted") {
+          globalThis.showStatus?.("未获得底层数据表读取权限，暂时继续使用当前数据。", true);
+          return;
+        }
+        const rememberedFile = await templateHandle.getFile();
+        const loaded = await loadTemplateFile(rememberedFile, { watching: true, restored: true });
+        if (loaded) {
+          startTemplateWatch();
+        }
+        return;
+      }
       const [handle] = await globalThis.showOpenFilePicker({
         multiple: false,
         types: [{
@@ -130,6 +288,13 @@
       const loaded = await loadTemplateFile(file, { watching: true });
       if (loaded) {
         templateHandle = handle;
+        try {
+          await saveTemplateHandle(handle);
+          templateButton.textContent = "更换或刷新 Excel";
+        } catch (error) {
+          console.warn("浏览器未能保存文件绑定", error);
+          templateName.textContent = `${file.name} · 已读取，重新打开网页后需再次选择`;
+        }
         startTemplateWatch();
       }
     } catch (error) {
@@ -137,6 +302,29 @@
         console.error(error);
         globalThis.showStatus?.(`无法打开电价分析模板：${error.message}`, true);
       }
+    }
+  }
+
+  async function restoreTemplateFile() {
+    if (typeof globalThis.showOpenFilePicker !== "function") return;
+    try {
+      const handle = await readTemplateHandle();
+      if (!handle) return;
+      templateHandle = handle;
+      const permission = await getTemplatePermission(handle);
+      if (permission !== "granted") {
+        templateName.textContent = `已记住 ${handle.name}，点击按钮授权更新`;
+        templateButton.textContent = "授权并刷新 Excel";
+        return;
+      }
+      const file = await handle.getFile();
+      const loaded = await loadTemplateFile(file, { watching: true, restored: true });
+      if (loaded) startTemplateWatch();
+    } catch (error) {
+      console.warn("无法恢复已绑定的电价数据表", error);
+      templateHandle = null;
+      templateName.textContent = `当前使用内置参考数据：${data.sourceName}；绑定后可自动检查更新`;
+      templateButton.textContent = "绑定或刷新 Excel";
     }
   }
 
@@ -158,6 +346,31 @@
     if (!base) return null;
     const markup = getMarkup();
     return base.map((value) => value + markup);
+  }
+
+  function getPackagePairMonthIndexes() {
+    return allMonthIndexes.filter(
+      (monthIndex) => Array.isArray(data.termPrices?.[monthIndex]) && Array.isArray(data.spotPrices?.[monthIndex]),
+    );
+  }
+
+  function formatHourRanges(hourIndexes) {
+    if (!hourIndexes.length) return "无明显稳定时段";
+    const selected = new Set(hourIndexes);
+    const ranges = [];
+    let start = null;
+    for (let hourIndex = 0; hourIndex <= 24; hourIndex += 1) {
+      if (hourIndex < 24 && selected.has(hourIndex)) {
+        if (start === null) start = hourIndex;
+        continue;
+      }
+      if (start === null) continue;
+      const startLabel = String(start).padStart(2, "0");
+      const endLabel = hourIndex === 24 ? "24" : String(hourIndex).padStart(2, "0");
+      ranges.push(`${startLabel}:00—${endLabel}:00`);
+      start = null;
+    }
+    return ranges.join("、");
   }
 
   function getGridLevels(monthIndex) {
@@ -215,7 +428,11 @@
       const tr = document.createElement("tr");
       row.forEach((value, columnIndex) => {
         const formatted = typeof value === "number"
-          ? (options.moneyColumns?.includes(columnIndex) ? moneyFormat.format(value) : numberFormat.format(value))
+          ? (options.numberFormatter
+              ? options.numberFormatter.format(value)
+              : options.moneyColumns?.includes(columnIndex)
+                ? moneyFormat.format(value)
+                : numberFormat.format(value))
           : value;
         const td = makeCell("td", formatted);
         if (value === null || value === undefined) td.classList.add("tou-placeholder");
@@ -253,21 +470,183 @@
     );
   }
 
-  function renderEnergyTable() {
-    const energyByMonth = getSourceEnergyByMonth();
-    const rows = data.hours.map((hour, hourIndex) => {
-      const availableValues = [...energyByMonth.values()].map((values) => values[hourIndex] || 0);
-      const values = allMonthIndexes.map((monthIndex) => energyByMonth.get(monthIndex)?.[hourIndex] ?? null);
-      const average = availableValues.length
-        ? availableValues.reduce((sum, value) => sum + value, 0) / availableValues.length
-        : null;
-      return [hour, ...values, average];
+  function triggerPriceDownload(blob, fileName) {
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = fileName;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  async function downloadBasePriceWorkbook(type) {
+    const config = type === "spot"
+      ? { label: "带现货基础价", matrix: data.spotPrices, button: spotDownloadButton }
+      : { label: "旬及以上基础价", matrix: data.termPrices, button: termDownloadButton };
+    if (!config.button) return;
+    const defaultLabel = config.button.textContent;
+    config.button.disabled = true;
+    config.button.textContent = "正在生成…";
+    try {
+      const result = {
+        headers: ["时段（元/MWh）", ...data.months],
+        rows: timeRows(config.matrix, allMonthIndexes),
+        meta: {
+          outputMode: "price-table",
+          sheetName: config.label,
+          autoFilter: false,
+        },
+      };
+      const bytes = await engine.toXlsx(result, globalThis.JSZip);
+      triggerPriceDownload(
+        new Blob([bytes], {
+          type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        }),
+        `${data.analysisYear || ""}年_${config.label}_24小时分时数据.xlsx`,
+      );
+      note.textContent = `已导出${config.label}，文件包含1—12月24小时数据，缺少月份保留空白。`;
+    } catch (error) {
+      console.error(error);
+      note.textContent = `${config.label}导出失败：${error.message}`;
+    } finally {
+      config.button.disabled = false;
+      config.button.textContent = defaultLabel;
+    }
+  }
+
+  function renderSupportFeeTable() {
+    const rows = allMonthIndexes.map((monthIndex) => {
+      const fee = data.gridSupportFees?.[monthIndex];
+      return fee
+        ? [data.months[monthIndex], fee.lineLoss, fee.transmission, fee.governmentFund, fee.systemOperation, fee.total]
+        : [data.months[monthIndex], null, null, null, null, null];
     });
     renderTable(
-      document.querySelector("#tou-energy-table"),
-      ["时段", ...data.months, "月份平均值"],
+      document.querySelector("#tou-support-fee-table"),
+      ["月份", "上网环节线损", "电量输配电价", "政府性基金及附加", "系统运行费折价", "国网其他费用合计"],
       rows,
+      { numberFormatter: supportFeeFormat },
     );
+    const totals = allMonthIndexes.map((monthIndex) => data.gridSupportFees?.[monthIndex]?.total ?? null);
+    const availableTotals = totals.filter(Number.isFinite);
+    const average = availableTotals.length
+      ? availableTotals.reduce((sum, value) => sum + value, 0) / availableTotals.length
+      : null;
+    supportFeeAverage.textContent = Number.isFinite(average) ? supportFeeFormat.format(average) : "—";
+    drawMonthlyBarChart(supportFeeChart, totals, average);
+    supportFeeNote.textContent = data.supportFeeNote || "暂无补充说明。";
+    renderCapacityDemandTable();
+  }
+
+  function renderCapacityDemandTable() {
+    const rows = (data.gridCapacityDemandCharges || []).map((item) => [
+      "两部制",
+      item.voltage,
+      item.demandPrice,
+      item.capacityPrice,
+    ]);
+    renderTable(
+      document.querySelector("#tou-capacity-demand-table"),
+      ["用电分类", "电压等级", "需量电价（元/千瓦·月）", "容量电价（元/千伏安·月）"],
+      rows,
+      {
+        numberFormatter: new Intl.NumberFormat("zh-CN", {
+          minimumFractionDigits: 1,
+          maximumFractionDigits: 1,
+        }),
+      },
+    );
+    capacityDemandNote.textContent = data.capacityDemandNote || "容（需）量电价为固定参考标准。";
+  }
+
+  function drawMonthlyBarChart(svg, values, average) {
+    svg.replaceChildren();
+    svg.setAttribute("aria-label", "国网其他费用1至12月变化柱状图");
+    const width = 960;
+    const height = 400;
+    const margin = { top: 56, right: 42, bottom: 58, left: 92 };
+    const numericValues = values.filter(Number.isFinite);
+    if (!numericValues.length) {
+      svg.append(createSvg("text", { x: width / 2, y: height / 2, "text-anchor": "middle", fill: "#68776f" }, "暂无可绘制的国网其他费用数据"));
+      return;
+    }
+
+    const minimum = 0;
+    const maximum = Math.max(...numericValues) * 1.22;
+    const plotWidth = width - margin.left - margin.right;
+    const plotHeight = height - margin.top - margin.bottom;
+    const x = (index) => margin.left + ((index + 0.5) / 12) * plotWidth;
+    const y = (value) => margin.top + ((maximum - value) / (maximum - minimum)) * plotHeight;
+
+    for (let tick = 0; tick <= 5; tick += 1) {
+      const value = minimum + ((maximum - minimum) * tick) / 5;
+      const position = y(value);
+      svg.append(
+        createSvg("line", { x1: margin.left, y1: position, x2: width - margin.right, y2: position, stroke: "#dce5df", "stroke-width": 1 }),
+        createSvg("text", { x: margin.left - 12, y: position + 4, "text-anchor": "end", fill: "#68776f", "font-size": 12 }, supportFeeFormat.format(value)),
+      );
+    }
+    allMonthIndexes.forEach((monthIndex) => {
+      svg.append(createSvg("text", {
+        x: x(monthIndex),
+        y: height - 24,
+        "text-anchor": "middle",
+        fill: "#68776f",
+        "font-size": 12,
+      }, data.months[monthIndex]));
+    });
+
+    const slotWidth = plotWidth / 12;
+    const barWidth = slotWidth * 0.58;
+    values.forEach((value, monthIndex) => {
+      if (!Number.isFinite(value)) return;
+      const centerX = x(monthIndex);
+      const top = y(value);
+      const bar = createSvg("rect", {
+        x: centerX - barWidth / 2,
+        y: top,
+        width: barWidth,
+        height: margin.top + plotHeight - top,
+        rx: 3,
+        fill: "#2f7d5b",
+      });
+      bar.append(createSvg("title", {}, `${data.months[monthIndex]}：${supportFeeFormat.format(value)} 元/千瓦时`));
+      svg.append(
+        bar,
+        createSvg("text", {
+          x: centerX,
+          y: top - 9,
+          "text-anchor": "middle",
+          fill: "#42534a",
+          "font-size": 11,
+        }, supportFeeFormat.format(value)),
+      );
+    });
+
+    if (Number.isFinite(average)) {
+      const averageY = y(average);
+      svg.append(
+        createSvg("line", {
+          x1: margin.left,
+          y1: averageY,
+          x2: width - margin.right,
+          y2: averageY,
+          stroke: "#d97706",
+          "stroke-width": 2,
+          "stroke-dasharray": "8 6",
+        }),
+        createSvg("text", {
+          x: width - margin.right,
+          y: averageY - 9,
+          "text-anchor": "end",
+          fill: "#9a5a06",
+          "font-size": 12,
+        }, `平均 ${supportFeeFormat.format(average)}`),
+      );
+    }
+    svg.append(createSvg("text", { x: 14, y: margin.top - 10, fill: "#68776f", "font-size": 12 }, "元/千瓦时"));
   }
 
   function renderGridTables() {
@@ -285,7 +664,9 @@
       inputs,
     );
     const matrix = Array(12).fill(null);
-    data.priceMonthIndexes.forEach((index) => { matrix[index] = getGridPrices(index); });
+    (data.gridMonthIndexes || data.priceMonthIndexes).forEach((index) => {
+      matrix[index] = getGridPrices(index);
+    });
     renderTable(
       document.querySelector("#tou-grid-table"),
       ["时段", ...data.months],
@@ -319,21 +700,87 @@
         },
       },
     );
-    const summary = allMonthIndexes.map((monthIndex) => {
-      const values = differenceMatrix[monthIndex];
-      if (!values) return [data.months[monthIndex], "待更新", "待更新", "待更新"];
-      return [
-        data.months[monthIndex],
-        values.filter((value) => value >= 0).length,
-        values.filter((value) => value < 0).length,
-        values.reduce((sum, value) => sum + value, 0) / values.length,
-      ];
+  }
+
+  function renderPackagePairComparison() {
+    const monthIndexes = getPackagePairMonthIndexes();
+    const monthlyRows = allMonthIndexes.map((monthIndex) => {
+      const term = data.termPrices?.[monthIndex];
+      const spot = data.spotPrices?.[monthIndex];
+      if (!term || !spot) return [data.months[monthIndex], null, null, null, null];
+      const termAverage = term.reduce((sum, value) => sum + number(value), 0) / term.length;
+      const spotAverage = spot.reduce((sum, value) => sum + number(value), 0) / spot.length;
+      const difference = termAverage - spotAverage;
+      const lowerPackage = difference > 0 ? "带现货" : difference < 0 ? "旬及以上" : "价格相同";
+      return [data.months[monthIndex], termAverage, spotAverage, Math.abs(difference), lowerPackage];
     });
     renderTable(
-      document.querySelector("#tou-comparison-summary-table"),
-      ["月份", "正价差小时数", "负价差小时数", "24 小时平均价差"],
-      summary,
+      document.querySelector("#tou-package-pair-summary-table"),
+      ["月份", "旬及以上算数均价（元/MWh）", "带现货算数均价（元/MWh）", "两种套餐差值（元/MWh）", "价格较低套餐"],
+      monthlyRows,
+      {
+        cellClass(value, rowIndex, columnIndex) {
+          if (columnIndex === 4 && value && value !== "价格相同") return "tou-preferred";
+          return "";
+        },
+      },
     );
+
+    const patternElement = document.querySelector("#tou-package-pair-pattern");
+    const userSummaryElement = document.querySelector("#tou-package-pair-user-summary");
+    const userComparison = calculateUserPackageComparison(
+      getSourceEnergyByMonth(),
+      data.termPrices,
+      data.spotPrices,
+      monthIndexes,
+      getMarkup(),
+    );
+    if (!userComparison.monthIndexes.length) {
+      userSummaryElement.textContent = "当前企业没有同时具备用电量、旬及以上价格和带现货价格的月份，暂不能进行用户套餐费用对比。";
+    } else {
+      const coveredMonths = userComparison.monthIndexes.map((monthIndex) => data.months[monthIndex]).join("、");
+      if (userComparison.cheaperType === "equal") {
+        userSummaryElement.textContent = `已按 ${state.company || "当前企业"} 在 ${coveredMonths} 共 ${userComparison.monthIndexes.length} 个月的实际24小时用电分布进行测算，合计电量 ${numberFormat.format(userComparison.totalEnergy)} MWh。两种套餐总体费用基本相同，差额不足0.01元。`;
+      } else {
+        const cheaperName = userComparison.cheaperType === "term" ? "旬及以上套餐" : "带现货套餐";
+        userSummaryElement.textContent = `已按 ${state.company || "当前企业"} 在 ${coveredMonths} 共 ${userComparison.monthIndexes.length} 个月的实际24小时用电分布进行测算，合计电量 ${numberFormat.format(userComparison.totalEnergy)} MWh。${cheaperName}更便宜，累计可少支出 ${moneyFormat.format(userComparison.difference)} 元。`;
+      }
+    }
+    if (!monthIndexes.length) {
+      patternElement.textContent = "当前没有可同时对比的旬及以上与带现货价格数据。";
+      return;
+    }
+
+    const hourStats = data.hours.map((hour, hourIndex) => {
+      const differences = monthIndexes.map(
+        (monthIndex) => data.termPrices[monthIndex][hourIndex] - data.spotPrices[monthIndex][hourIndex],
+      );
+      const averageDifference = differences.reduce((sum, value) => sum + value, 0) / differences.length;
+      return {
+        hour,
+        hourIndex,
+        averageDifference,
+        spotLowerCount: differences.filter((value) => value > 0).length,
+        termLowerCount: differences.filter((value) => value < 0).length,
+      };
+    });
+    const usualThreshold = Math.ceil(monthIndexes.length * 0.6);
+    const spotLowerHours = hourStats
+      .filter((item) => item.spotLowerCount >= usualThreshold && item.averageDifference > 0)
+      .map((item) => item.hourIndex);
+    const termLowerHours = hourStats
+      .filter((item) => item.termLowerCount >= usualThreshold && item.averageDifference < 0)
+      .map((item) => item.hourIndex);
+    const mixedHours = hourStats
+      .filter((item) => !spotLowerHours.includes(item.hourIndex) && !termLowerHours.includes(item.hourIndex))
+      .map((item) => item.hourIndex);
+    const strongestSpotHours = hourStats
+      .filter((item) => item.averageDifference > 0)
+      .sort((left, right) => right.averageDifference - left.averageDifference)
+      .slice(0, 3)
+      .map((item) => `${item.hour}（平均低 ${numberFormat.format(item.averageDifference)} 元/MWh）`)
+      .join("、");
+    patternElement.textContent = `基于已更新的 ${monthIndexes.length} 个月数据，带现货通常较低的时段为 ${formatHourRanges(spotLowerHours)}；旬及以上通常较低的时段为 ${formatHourRanges(termLowerHours)}；${formatHourRanges(mixedHours)} 的月间变化较大。带现货优势较明显的时段主要是 ${strongestSpotHours || "暂无"}。`;
   }
 
   function drawLineChart(svg, series, label, unit) {
@@ -487,15 +934,18 @@
   function refreshAll() {
     if (!state.monthly) return;
     companyLabel.textContent = state.company || "—";
-    renderEnergyTable();
     renderGridTables();
+    renderPackagePairComparison();
     renderComparison();
     renderPriceChart();
     renderSavings();
     const priceMonths = data.priceMonthIndexes.map((index) => data.months[index]).join("、");
+    const gridMonths = (data.gridMonthIndexes || data.priceMonthIndexes)
+      .map((index) => data.months[index])
+      .join("、");
     note.textContent = state.sourceMonthIndexes.length
-      ? `已按月份读取 ${state.company} 的 ${state.sourceMonthIndexes.length} 个月电量；不限制数据年份，当前模板可计算 ${priceMonths}。所有表格均保留 1—12 月位置。`
-      : `当前企业没有可匹配的月度电量。模板已按 1—12 月保留位置，当前具备完整价格的月份为 ${priceMonths}。`;
+      ? `已按月份读取 ${state.company} 的 ${state.sourceMonthIndexes.length} 个月电量；国网分时电价已更新至 ${gridMonths}，具备套餐对比和成本测算条件的月份为 ${priceMonths}。所有表格均保留 1—12 月位置。`
+      : `当前企业没有可匹配的月度电量。国网分时电价已更新至 ${gridMonths}，具备完整套餐价格的月份为 ${priceMonths}。`;
   }
 
   function updateFromSource(detail) {
@@ -527,28 +977,43 @@
         view.hidden = view.dataset.touPanel !== tab.dataset.touTab;
       });
       if (tab.dataset.touTab === "curves") renderPriceChart();
+      if (tab.dataset.touTab === "package-pair") renderPackagePairComparison();
     });
   });
   packageSelect.addEventListener("change", refreshAll);
   markupInput.addEventListener("input", refreshAll);
+  termDownloadButton?.addEventListener("click", () => downloadBasePriceWorkbook("term"));
+  spotDownloadButton?.addEventListener("click", () => downloadBasePriceWorkbook("spot"));
   templateButton.addEventListener("click", chooseTemplateFile);
-  templateInput.addEventListener("change", () => {
+  templateInput.addEventListener("change", async () => {
     const [file] = templateInput.files;
     if (file) {
       templateHandle = null;
       stopTemplateWatch();
-      loadTemplateFile(file);
+      const loaded = await loadTemplateFile(file);
+      if (loaded) {
+        try {
+          await clearTemplateHandle();
+        } catch (error) {
+          console.warn("无法清除旧的文件绑定", error);
+        }
+      }
     }
   });
 
   renderBaseTable("#tou-term-table", data.termPrices);
   renderBaseTable("#tou-spot-table", data.spotPrices);
+  renderSupportFeeTable();
+  renderOfficialStatus();
   packageSelect.value = data.defaultPackage;
   markupInput.value = String(data.defaultMarkup);
-  templateName.textContent = `当前使用内置参考数据：${data.sourceName}`;
+  templateName.textContent = `当前使用内置官网数据：${data.sourceName}；也可绑定完整模板或官网导出表`;
+  templateButton.textContent = "绑定或刷新 Excel";
   window.addEventListener("hourly-data-updated", (event) => updateFromSource(event.detail));
   globalThis.TouAnalysis = {
     parsePriceWorkbook: (workbook, fileName) => templateParser.parsePriceWorkbook(workbook, fileName, data),
+    parseOfficialMarketWorkbook: (workbook, fileName) => templateParser.parseOfficialMarketWorkbook(workbook, fileName, data),
+    mergeOfficialGridMonth: (update) => templateParser.mergeOfficialGridMonth(update, data),
     getAnalysisSnapshot,
   };
 })();

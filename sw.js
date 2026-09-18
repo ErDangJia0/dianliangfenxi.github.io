@@ -1,4 +1,4 @@
-const CACHE_NAME = "hourly-data-tool-v12";
+const CACHE_NAME = "hourly-data-tool-v31";
 const APP_ASSETS = [
   "./",
   "./index.html",

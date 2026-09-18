@@ -42,12 +42,12 @@
   function parseSharedStrings(xml) {
     if (!xml) return [];
     const values = [];
-    const itemPattern = /<si\b[^>]*>([\s\S]*?)<\/si>/gi;
+    const itemPattern = /<(?:[\w-]+:)?si\b[^>]*>([\s\S]*?)<\/(?:[\w-]+:)?si>/gi;
     let itemMatch;
 
     while ((itemMatch = itemPattern.exec(xml))) {
       const textParts = [];
-      const textPattern = /<t\b[^>]*>([\s\S]*?)<\/t>/gi;
+      const textPattern = /<(?:[\w-]+:)?t\b[^>]*>([\s\S]*?)<\/(?:[\w-]+:)?t>/gi;
       let textMatch;
       while ((textMatch = textPattern.exec(itemMatch[1]))) {
         textParts.push(decodeXml(textMatch[1]));
@@ -67,7 +67,7 @@
 
   function extractTextFragments(cellBody) {
     const parts = [];
-    const pattern = /<t\b[^>]*>([\s\S]*?)<\/t>/gi;
+    const pattern = /<(?:[\w-]+:)?t\b[^>]*>([\s\S]*?)<\/(?:[\w-]+:)?t>/gi;
     let match;
     while ((match = pattern.exec(cellBody))) parts.push(decodeXml(match[1]));
     return parts.join("");
@@ -75,13 +75,13 @@
 
   function parseWorksheet(xml, sharedStrings) {
     const rows = [];
-    const rowPattern = /<row\b[^>]*\br="(\d+)"[^>]*>([\s\S]*?)<\/row>/gi;
+    const rowPattern = /<(?:[\w-]+:)?row\b[^>]*\br="(\d+)"[^>]*>([\s\S]*?)<\/(?:[\w-]+:)?row>/gi;
     let rowMatch;
 
     while ((rowMatch = rowPattern.exec(xml))) {
       const rowIndex = Number(rowMatch[1]) - 1;
       const row = [];
-      const cellPattern = /<c\b([^>]*)>([\s\S]*?)<\/c>/gi;
+      const cellPattern = /<(?:[\w-]+:)?c\b([^>]*)>([\s\S]*?)<\/(?:[\w-]+:)?c>/gi;
       let cellMatch;
 
       while ((cellMatch = cellPattern.exec(rowMatch[2]))) {
@@ -90,7 +90,7 @@
         const reference = getAttribute(attributes, "r");
         const type = getAttribute(attributes, "t");
         const columnIndex = columnIndexFromReference(reference);
-        const rawValue = body.match(/<v\b[^>]*>([\s\S]*?)<\/v>/i)?.[1] ?? "";
+        const rawValue = body.match(/<(?:[\w-]+:)?v\b[^>]*>([\s\S]*?)<\/(?:[\w-]+:)?v>/i)?.[1] ?? "";
         let value = null;
 
         if (type === "inlineStr") {
@@ -142,7 +142,7 @@
     }
 
     const sheets = [];
-    const sheetPattern = /<sheet\b([^>]*?)\/?>(?:<\/sheet>)?/gi;
+    const sheetPattern = /<(?:[\w-]+:)?sheet\b([^>]*?)\/?>(?:<\/(?:[\w-]+:)?sheet>)?/gi;
     let sheetMatch;
 
     while ((sheetMatch = sheetPattern.exec(workbookXml))) {
@@ -710,20 +710,31 @@
     };
   }
 
-  function transposeMonthlySummary(monthlyResult) {
+  function transposeMonthlySummary(monthlyResult, options = {}) {
     const months = monthlyResult.rows.map((row) => String(row[1] || ""));
+    const decimalPlaces = Number.isInteger(options.decimalPlaces)
+      ? Math.min(10, Math.max(0, options.decimalPlaces))
+      : null;
+    const formatNumber = (value) => {
+      if (typeof value !== "number" || !Number.isFinite(value)) return value;
+      return decimalPlaces == null ? value : Number(value.toFixed(decimalPlaces));
+    };
     const rows = HOUR_HEADERS.map((hour, hourIndex) => {
-      const monthValues = monthlyResult.rows.map((row) => row[hourIndex + 2]);
+      const monthValues = monthlyResult.rows.map((row) => formatNumber(row[hourIndex + 2]));
       const numericValues = monthValues.filter((value) => typeof value === "number");
       const hourlyTotal = numericValues.length
-        ? cleanNumber(numericValues.reduce((sum, value) => sum + value, 0))
+        ? formatNumber(cleanNumber(numericValues.reduce((sum, value) => sum + value, 0)))
         : null;
       return [hour, ...monthValues, hourlyTotal];
     });
-    const monthTotals = monthlyResult.rows.map((row) => row[row.length - 1]);
-    const grandTotal = cleanNumber(
+    const monthTotals = decimalPlaces == null
+      ? monthlyResult.rows.map((row) => row[row.length - 1])
+      : months.map((_, monthIndex) => formatNumber(
+          rows.reduce((sum, row) => sum + (typeof row[monthIndex + 1] === "number" ? row[monthIndex + 1] : 0), 0),
+        ));
+    const grandTotal = formatNumber(cleanNumber(
       monthTotals.reduce((sum, value) => sum + (typeof value === "number" ? value : 0), 0),
-    );
+    ));
     rows.push([
       "月合计(MWh)",
       ...monthTotals,
@@ -737,6 +748,7 @@
         ...monthlyResult.meta,
         outputMode: "monthly-transposed",
         selectedCompany: monthlyResult.meta.selectedCompany || monthlyResult.rows[0]?.[0] || "",
+        ...(decimalPlaces == null ? {} : { decimalPlaces }),
       },
     };
   }
@@ -748,8 +760,16 @@
   }
 
   function toCsv(result) {
+    const decimalPlaces = Number.isInteger(result.meta?.decimalPlaces)
+      ? Math.min(10, Math.max(0, result.meta.decimalPlaces))
+      : null;
     return [result.headers, ...result.rows]
-      .map((row) => row.map(quoteCsv).join(","))
+      .map((row) => row.map((value) => {
+        if (typeof value === "number" && decimalPlaces != null) {
+          return value.toFixed(decimalPlaces);
+        }
+        return quoteCsv(value);
+      }).join(","))
       .join("\r\n");
   }
 
@@ -805,11 +825,20 @@
         ].join("");
     const topLeftCell = dateColumns === 2 ? "C2" : "B2";
     const createdAt = new Date().toISOString();
-    const sheetName = isTransposedMonthly
+    const requestedSheetName = String(result.meta.sheetName || "")
+      .replace(/[\\/:*?\[\]]/g, "_")
+      .replace(/^'+|'+$/g, "")
+      .slice(0, 31);
+    const shouldAutoFilter = result.meta.autoFilter !== false && !isTransposedMonthly;
+    const decimalPlaces = Number.isInteger(result.meta.decimalPlaces)
+      ? Math.min(10, Math.max(0, result.meta.decimalPlaces))
+      : 6;
+    const numberFormatCode = decimalPlaces === 0 ? "0" : `0.${"0".repeat(decimalPlaces)}`;
+    const sheetName = requestedSheetName || (isTransposedMonthly
       ? "月度分时数据"
       : result.meta.outputMode === "monthly"
         ? "月度24小时数据"
-        : "24小时分时数据";
+        : "24小时分时数据");
 
     zip.file(
       "[Content_Types].xml",
@@ -837,13 +866,13 @@
       "docProps/app.xml",
       '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
         '<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes">' +
-        '<Application>24小时分时数据整理工具</Application></Properties>',
+        '<Application>售电套餐比选小工具</Application></Properties>',
     );
     zip.file(
       "docProps/core.xml",
       '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
         '<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">' +
-        '<dc:creator>24小时分时数据整理工具</dc:creator>' +
+        '<dc:creator>售电套餐比选小工具</dc:creator>' +
         `<dcterms:created xsi:type="dcterms:W3CDTF">${createdAt}</dcterms:created></cp:coreProperties>`,
     );
     zip.file(
@@ -864,7 +893,7 @@
       "xl/styles.xml",
       '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
         '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
-        '<numFmts count="1"><numFmt numFmtId="164" formatCode="0.000000"/></numFmts>' +
+        `<numFmts count="1"><numFmt numFmtId="164" formatCode="${numberFormatCode}"/></numFmts>` +
         '<fonts count="2"><font><sz val="11"/><name val="Aptos"/></font><font><b/><color rgb="FFFFFFFF"/><sz val="11"/><name val="Aptos"/></font></fonts>' +
         '<fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF245C46"/><bgColor indexed="64"/></patternFill></fill></fills>' +
         '<borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border><border><left/><right/><top/><bottom style="thin"><color rgb="FFD9E3DD"/></bottom><diagonal/></border></borders>' +
@@ -879,7 +908,7 @@
         `<dimension ref="A1:${lastColumn}${lastRow}"/>` +
         `<sheetViews><sheetView workbookViewId="0"><pane xSplit="${dateColumns}" ySplit="1" topLeftCell="${topLeftCell}" activePane="bottomRight" state="frozen"/></sheetView></sheetViews>` +
         `<cols>${columnsXml}</cols><sheetData>${rowsXml}</sheetData>` +
-        `${isTransposedMonthly ? "" : `<autoFilter ref="A1:${lastColumn}${lastRow}"/>`}</worksheet>`,
+        `${shouldAutoFilter ? `<autoFilter ref="A1:${lastColumn}${lastRow}"/>` : ""}</worksheet>`,
     );
 
     return zip.generateAsync({ type: "uint8array", compression: "DEFLATE" });
@@ -1049,13 +1078,13 @@
       "docProps/app.xml",
       '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
         '<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes">' +
-        '<Application>24小时分时数据整理工具</Application></Properties>',
+        '<Application>售电套餐比选小工具</Application></Properties>',
     );
     zip.file(
       "docProps/core.xml",
       '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
         '<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">' +
-        '<dc:creator>24小时分时数据整理工具</dc:creator>' +
+        '<dc:creator>售电套餐比选小工具</dc:creator>' +
         `<dcterms:created xsi:type="dcterms:W3CDTF">${createdAt}</dcterms:created></cp:coreProperties>`,
     );
     zip.file(

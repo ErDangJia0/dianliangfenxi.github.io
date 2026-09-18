@@ -3,18 +3,18 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="在浏览器本地批量整理企业分时电量数据，生成月度 24 小时汇总和曲线。" />
+    <meta name="description" content="在浏览器本地整理企业分时电量，并进行售电套餐和购电成本分析。" />
     <meta name="theme-color" content="#245c46" />
-    <title>24 小时分时数据整理工具</title>
-    <link rel="manifest" href="manifest.webmanifest?v=20260916-9" />
-    <link rel="icon" href="icon.svg?v=20260916-9" type="image/svg+xml" />
-    <link rel="stylesheet" href="styles.css?v=20260916-9" />
+    <title>售电套餐比选小工具</title>
+    <link rel="manifest" href="manifest.webmanifest?v=20260918-3" />
+    <link rel="icon" href="icon.svg?v=20260917-2" type="image/svg+xml" />
+    <link rel="stylesheet" href="styles.css?v=20260918-3" />
   </head>
   <body>
     <main class="app-shell">
       <header class="page-header">
         <p class="eyebrow">浏览器本地处理 · 通用版</p>
-        <h1>24 小时分时数据整理工具</h1>
+        <h1>售电套餐比选小工具</h1>
         <p class="intro">
           批量拖入 Excel、CSV 或 TSV，按企业、日期和时点整理月度 24 小时数据。
           支持常见字段名称和多种时间间隔，文件只在当前设备处理，不会上传。
@@ -23,7 +23,7 @@
           <summary>查看源数据要求</summary>
           <ul>
             <li>至少包含企业或对象名称、日期、时点、电量数值四类字段。</li>
-            <li>支持常见字段别名；自动识别失败时，可以手动选择对应列。</li>
+            <li>支持常见字段别名，导入后自动识别企业、日期、时点和电量字段。</li>
             <li>支持每天一行、后接 96 个分时列的横向格式，并自动展开处理。</li>
             <li>支持 5、15、30、60 分钟等分时数据，系统会自动汇总到 24 小时。</li>
             <li>同一企业分散在多个文件时会按企业名称自动合并；建议保持相同计量单位。</li>
@@ -56,61 +56,12 @@
         </div>
       </section>
 
-      <section class="panel" id="config-panel" aria-labelledby="config-title" hidden>
-        <div class="section-heading">
-          <span class="step-number">2</span>
-          <div>
-            <h2 id="config-title">确认处理规则</h2>
-            <p id="source-summary"></p>
-          </div>
-        </div>
-
-        <div class="form-grid">
-          <label id="sheet-field" hidden>
-            <span>工作表</span>
-            <select id="sheet-select"></select>
-          </label>
-          <label>
-            <span>企业／对象名称列</span>
-            <select id="company-column"></select>
-          </label>
-          <label>
-            <span>日期列</span>
-            <select id="date-column"></select>
-          </label>
-          <label>
-            <span>时点列</span>
-            <select id="time-column"></select>
-          </label>
-          <label>
-            <span>电量数值列</span>
-            <select id="value-column"></select>
-          </label>
-          <label>
-            <span>时点含义</span>
-            <select id="interval-mode">
-              <option value="auto">自动识别</option>
-              <option value="end">区间结束时点</option>
-              <option value="start">区间开始时点</option>
-            </select>
-          </label>
-        </div>
-
-        <div class="rule-note">
-          批量模式会读取每个文件的第一个工作表，并按表头名称自动对齐。
-          支持每个时点一行，以及每天一行且包含 00:15—24:00 横向分时列的源文件。
-          “区间结束时点”模式下，00:15—01:00 合为第 1 小时，23:15—24:00 合为第 24 小时；
-          同一企业、日期和小时内的多条记录会自动相加。
-        </div>
-        <button class="primary-button" id="process-button" type="button">生成月度 24 小时数据</button>
-      </section>
-
       <section class="panel result-panel" id="result-panel" aria-labelledby="result-title" hidden>
         <div class="result-heading">
           <div class="section-heading">
-            <span class="step-number">3</span>
+            <span class="step-number">2</span>
             <div>
-              <h2 id="result-title">月度 24 小时处理结果</h2>
+              <h2 id="result-title">分时数据处理结果</h2>
               <p id="result-summary"></p>
             </div>
           </div>
@@ -120,20 +71,11 @@
           </div>
         </div>
 
-        <div class="result-filters" aria-label="结果筛选">
+        <div class="result-filters" aria-label="企业筛选">
           <label>
             <span>选择企业／对象</span>
             <select id="filter-company"><option value="">请选择企业／对象</option></select>
           </label>
-          <label>
-            <span>开始月份</span>
-            <input id="filter-month-start" type="month" />
-          </label>
-          <label>
-            <span>结束月份</span>
-            <input id="filter-month-end" type="month" />
-          </label>
-          <button class="secondary-button" id="reset-filters" type="button">清除筛选</button>
         </div>
 
         <div class="stats" aria-label="处理统计">
@@ -158,13 +100,13 @@
       <section class="panel curve-panel" id="curve-panel" aria-labelledby="curve-title" hidden>
         <div class="curve-heading">
           <div class="section-heading">
-            <span class="step-number">4</span>
+            <span class="step-number">3</span>
             <div>
-              <h2 id="curve-title">24 小时分时曲线</h2>
-              <p id="curve-summary">日曲线看整月变化，月曲线对比全部月份</p>
+              <h2 id="curve-title">用电曲线分析</h2>
+              <p id="curve-summary">查看24小时曲线、月内日总量及各月总量</p>
             </div>
           </div>
-          <button class="secondary-button" id="download-curve" type="button">下载曲线 PNG</button>
+          <button class="secondary-button" id="download-curve" type="button">下载图表 PNG</button>
         </div>
 
         <div class="curve-controls">
@@ -176,6 +118,7 @@
             <span>曲线类型</span>
             <select id="curve-type">
               <option value="daily">日曲线（整月叠加）</option>
+              <option value="daily-total">月内日总电量（柱状图）</option>
               <option value="monthly">月曲线（全部月份）</option>
               <option value="multi">多月总曲线</option>
             </select>
@@ -195,32 +138,34 @@
         </div>
 
         <div class="curve-stats">
-          <span>合计 <strong id="curve-total">0</strong> MWh</span>
-          <span>峰值 <strong id="curve-peak">0</strong></span>
-          <span>小时均值 <strong id="curve-average">0</strong> MWh</span>
+          <span><span id="curve-total-label">合计</span> <strong id="curve-total">0.00</strong> MWh</span>
+          <span><span id="curve-peak-label">峰值</span> <strong id="curve-peak">0.00</strong></span>
+          <span><span id="curve-average-label">小时均值</span> <strong id="curve-average">0.00</strong> MWh</span>
         </div>
+
+        <div class="curve-month-totals" id="curve-month-totals" aria-live="polite" hidden></div>
 
         <div class="chart-wrap" id="chart-wrap">
           <svg id="curve-chart" viewBox="0 0 960 380" role="img" aria-label="24 小时分时曲线"></svg>
         </div>
-        <p class="preview-note">横轴为第 1—24 小时，纵轴为电量（MWh）。日曲线用不同颜色叠加当月每天，不显示日期图例；月曲线会标明对应月份。</p>
+        <p class="preview-note" id="curve-note">横轴为第 1—24 小时，纵轴为电量（MWh）。日曲线用不同颜色叠加当月每天，不显示日期图例。</p>
       </section>
 
       <section class="panel analysis-panel" id="tou-panel" aria-labelledby="tou-title" hidden>
         <div class="section-heading">
-          <span class="step-number">5</span>
+          <span class="step-number">4</span>
           <div>
-            <h2 id="tou-title">分时电价与购电成本分析</h2>
-            <p id="tou-summary">参考 TOU_Price_Analysis_Fixed.xlsx 的核心运行逻辑，并按全年 12 个月预留更新位置</p>
+            <h2 id="tou-title">购电成本分析</h2>
+            <p id="tou-summary">采用官网定时更新的内置电价数据，并按全年 12 个月预留更新位置</p>
           </div>
         </div>
 
         <div class="analysis-controls">
-          <div class="analysis-file-control">
-            <span>电价分析模板</span>
-            <input id="tou-template-input" type="file" accept=".xlsx" />
-            <button class="secondary-button" id="tou-template-button" type="button">选择或刷新 Excel</button>
-            <small id="tou-template-name">当前使用内置参考数据</small>
+          <div class="analysis-file-control" hidden aria-hidden="true">
+            <span>电价数据文件（备用手动刷新）</span>
+            <input id="tou-template-input" type="file" accept=".xlsx" disabled />
+            <button class="secondary-button" id="tou-template-button" type="button" disabled>绑定或刷新 Excel</button>
+            <small id="tou-template-name">当前使用内置官网数据；也可绑定完整模板或交易中心官网导出表</small>
           </div>
           <label>
             <span>当前企业／对象（跟随处理结果）</span>
@@ -238,34 +183,57 @@
             <input id="tou-markup" type="number" value="20" step="0.001" />
           </label>
         </div>
+        <p class="analysis-note" id="tou-official-status"></p>
         <p class="analysis-note" id="tou-note" aria-live="polite"></p>
 
         <div class="analysis-tabs" role="tablist" aria-label="电价分析工作表">
           <button type="button" class="analysis-tab is-active" role="tab" aria-selected="true" data-tou-tab="term">旬及以上基础价</button>
           <button type="button" class="analysis-tab" role="tab" aria-selected="false" data-tou-tab="spot">带现货基础价</button>
-          <button type="button" class="analysis-tab" role="tab" aria-selected="false" data-tou-tab="energy">企业分时电量</button>
+          <button type="button" class="analysis-tab" role="tab" aria-selected="false" data-tou-tab="package-pair">旬及以上/带现货对比</button>
           <button type="button" class="analysis-tab" role="tab" aria-selected="false" data-tou-tab="grid">国网分时电价</button>
+          <button type="button" class="analysis-tab" role="tab" aria-selected="false" data-tou-tab="support-fee">国网其他费用</button>
           <button type="button" class="analysis-tab" role="tab" aria-selected="false" data-tou-tab="comparison">套餐电价对比</button>
           <button type="button" class="analysis-tab" role="tab" aria-selected="false" data-tou-tab="curves">价格曲线对比</button>
           <button type="button" class="analysis-tab" role="tab" aria-selected="false" data-tou-tab="savings">电费节省分析</button>
         </div>
 
         <div class="analysis-view" data-tou-panel="term">
-          <h3>旬及以上套餐基础价</h3>
-          <p>单位为元/MWh，实际套餐价格等于基础价加统一加价；暂无数据的月份保留空白位置。</p>
+          <div class="analysis-view-heading">
+            <div>
+              <h3>旬及以上套餐基础价</h3>
+              <p>单位为元/MWh，实际套餐价格等于基础价加统一加价；暂无数据的月份保留空白位置。</p>
+            </div>
+            <button class="secondary-button analysis-download-button" id="download-tou-term" type="button">下载</button>
+          </div>
           <div class="analysis-table-wrap"><table class="analysis-table" id="tou-term-table"><thead></thead><tbody></tbody></table></div>
         </div>
 
         <div class="analysis-view" data-tou-panel="spot" hidden>
-          <h3>带现货套餐基础价</h3>
-          <p>单位为元/MWh，实际套餐价格等于基础价加统一加价；暂无数据的月份保留空白位置。</p>
+          <div class="analysis-view-heading">
+            <div>
+              <h3>带现货套餐基础价</h3>
+              <p>单位为元/MWh，实际套餐价格等于基础价加统一加价；暂无数据的月份保留空白位置。</p>
+            </div>
+            <button class="secondary-button analysis-download-button" id="download-tou-spot" type="button">下载</button>
+          </div>
           <div class="analysis-table-wrap"><table class="analysis-table" id="tou-spot-table"><thead></thead><tbody></tbody></table></div>
         </div>
 
-        <div class="analysis-view" data-tou-panel="energy" hidden>
-          <h3>所选企业月度 24 小时分时电量</h3>
-          <p>这里直接采用前面处理后的企业月度数据，不限制年份，按 1—12 月对应展示；同一月份跨年份出现时会合并电量。</p>
-          <div class="analysis-table-wrap"><table class="analysis-table" id="tou-energy-table"><thead></thead><tbody></tbody></table></div>
+        <div class="analysis-view" data-tou-panel="package-pair" hidden>
+          <h3>旬及以上与带现货算数均价对比</h3>
+          <p>差值为两种算数均价的绝对差；“价格较低套餐”用于直观看出当月哪种基础价更低。统一加价对两种套餐相同，因此不影响判断。</p>
+          <h4>1—12月算数均价对比</h4>
+          <div class="analysis-table-wrap compact-analysis-table"><table class="analysis-table" id="tou-package-pair-summary-table"><thead></thead><tbody></tbody></table></div>
+          <div class="tou-comparison-insights" aria-live="polite">
+            <div>
+              <strong>当前企业套餐费用结论</strong>
+              <p id="tou-package-pair-user-summary">导入并选择企业后，将按该企业有数据月份的实际24小时用电分布计算。</p>
+            </div>
+            <div>
+              <strong>两个套餐的对比分析</strong>
+              <p id="tou-package-pair-pattern">正在根据已有月份分析两种价格的时段差异。</p>
+            </div>
+          </div>
         </div>
 
         <div class="analysis-view" data-tou-panel="grid" hidden>
@@ -285,11 +253,37 @@
           <div class="analysis-table-wrap"><table class="analysis-table" id="tou-grid-table"><thead></thead><tbody></tbody></table></div>
         </div>
 
+        <div class="analysis-view" data-tou-panel="support-fee" hidden>
+          <h3>国网其他费用</h3>
+          <p>与“国网分时电价”采用同一份当月《电网企业代理购电工商业用户电价价格表》、同一用电类别和电压等级口径。展示1—12月其他费用及已有月份平均值，不与裸电价合并，也不改变现有购电成本测算。单位为元/千瓦时。</p>
+          <div class="tou-formula-box">
+            <strong>构成</strong>
+            <p>国网其他费用＝上网环节线损＋电量输配电价＋政府性基金及附加＋系统运行费折价。</p>
+          </div>
+          <div class="analysis-table-wrap compact-analysis-table"><table class="analysis-table" id="tou-support-fee-table"><thead></thead><tbody></tbody></table></div>
+          <div class="curve-stats tou-support-fee-stats">
+            <span>已有月份平均值 <strong id="tou-support-fee-average">—</strong> 元/千瓦时</span>
+          </div>
+          <div class="chart-wrap"><svg id="tou-support-fee-chart" viewBox="0 0 960 400" role="img" aria-label="国网其他费用1至12月变化柱状图"></svg></div>
+          <p class="preview-note" id="tou-support-fee-note"></p>
+
+          <section class="tou-fixed-charge-block" aria-labelledby="tou-capacity-demand-title">
+            <div class="tou-fixed-charge-heading">
+              <div>
+                <h4 id="tou-capacity-demand-title">容（需）量电费收费标准</h4>
+                <p>取自国网分时电价同一官方价表的“容（需）量电价”栏，按两部制电压等级固定展示，不纳入每月自动更新。</p>
+              </div>
+              <span class="tou-fixed-badge">固定标准</span>
+            </div>
+            <div class="analysis-table-wrap compact-analysis-table"><table class="analysis-table" id="tou-capacity-demand-table"><thead></thead><tbody></tbody></table></div>
+            <p class="preview-note" id="tou-capacity-demand-note"></p>
+          </section>
+        </div>
+
         <div class="analysis-view" data-tou-panel="comparison" hidden>
           <h3>国网与所选套餐 24 小时电价差</h3>
           <p>价差=国网电价－售电套餐电价。正数表示国网较贵，负数表示国网较便宜。</p>
           <div class="analysis-table-wrap"><table class="analysis-table" id="tou-comparison-table"><thead></thead><tbody></tbody></table></div>
-          <div class="analysis-table-wrap compact-analysis-table"><table class="analysis-table" id="tou-comparison-summary-table"><thead></thead><tbody></tbody></table></div>
         </div>
 
         <div class="analysis-view" data-tou-panel="curves" hidden>
@@ -314,16 +308,16 @@
       </section>
 
       <footer class="page-footer">
-        <span>通用版 1.3</span>
+        <span>通用版 3.1</span>
         <span>所有文件均在当前设备本地处理</span>
       </footer>
     </main>
 
-    <script src="jszip.min.js?v=20260916-9"></script>
-    <script src="engine.js?v=20260916-9"></script>
-    <script src="tou-data.js?v=20260916-9"></script>
-    <script src="tou-template.js?v=20260916-9"></script>
-    <script src="app.js?v=20260916-9"></script>
-    <script src="tou-analysis.js?v=20260916-9"></script>
+    <script src="jszip.min.js?v=20260917-2"></script>
+    <script src="engine.js?v=20260918-4"></script>
+    <script src="tou-data.js?v=20260918-3"></script>
+    <script src="tou-template.js?v=20260918-3"></script>
+    <script src="app.js?v=20260918-5"></script>
+    <script src="tou-analysis.js?v=20260918-6"></script>
   </body>
 </html>
